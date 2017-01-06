@@ -1826,7 +1826,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 void vTaskStartScheduler( void )
 {
 BaseType_t xReturn;
-
+	
 	/* Add the idle task at the lowest priority. */
 	#if( configSUPPORT_STATIC_ALLOCATION == 1 )
 	{
@@ -1913,6 +1913,8 @@ BaseType_t xReturn;
 		}
 		else
 		{
+			vTaskDelete(xTaskGetIdleTaskHandle());
+			vTaskDelete(xTimerGetTimerDaemonTaskHandle());
 			/* Should only reach here if a task calls xTaskEndScheduler(). */
 		}
 	}

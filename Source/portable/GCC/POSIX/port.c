@@ -128,7 +128,7 @@ static void prvDeleteThread( void *xThreadId );
 /*
  * Exception handlers.
  */
-void vPortYield( void );
+//void vPortYield( void );
 void vPortSystemTickHandler( int sig );
 
 /*
@@ -507,7 +507,8 @@ pdTASK_CODE pvCode = pxParams->pxCode;
 void * pParams = pxParams->pvParams;
 	vPortFree( pvParams );
 
-	pthread_cleanup_push( prvDeleteThread, (void *)pthread_self() );
+	pthread_t thr = pthread_self();
+	pthread_cleanup_push( prvDeleteThread, (void*)thr );
 
 	if ( 0 == pthread_mutex_lock( &xSingleThreadMutex ) )
 	{
