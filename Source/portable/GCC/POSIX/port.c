@@ -65,6 +65,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <limits.h>
+#include <semaphore.h>
 
 /* Scheduler includes. */
 #include "FreeRTOS.h"
@@ -100,12 +101,23 @@ static pthread_t hMainThread = ( pthread_t )NULL;
 /*-----------------------------------------------------------*/
 
 static volatile portBASE_TYPE xSentinel = 0;
+static pthread_mutex_t sm = PTHREAD_MUTEX_INITIALIZER;
+//static sem_t xSentinel;
+/*
 static volatile portBASE_TYPE xSchedulerEnd = pdFALSE;
 static volatile portBASE_TYPE xInterruptsEnabled = pdTRUE;
 static volatile portBASE_TYPE xServicingTick = pdFALSE;
 static volatile portBASE_TYPE xPendYield = pdFALSE;
-static volatile portLONG lIndexOfLastAddedTask = 0;
 static volatile unsigned portBASE_TYPE uxCriticalNesting;
+static volatile portLONG lIndexOfLastAddedTask = 0;
+*/
+static volatile sig_atomic_t xSchedulerEnd = pdFALSE;
+static volatile sig_atomic_t xInterruptsEnabled = pdTRUE;
+static volatile sig_atomic_t xServicingTick = pdFALSE;
+static volatile sig_atomic_t xPendYield = pdFALSE;
+static volatile sig_atomic_t uxCriticalNesting;
+static volatile sig_atomic_t lIndexOfLastAddedTask = 0;
+
 /*-----------------------------------------------------------*/
 
 /*
@@ -123,6 +135,7 @@ static portLONG prvGetFreeThreadState( void );
 static void prvSetTaskCriticalNesting( pthread_t xThreadId, unsigned portBASE_TYPE uxNesting );
 static unsigned portBASE_TYPE prvGetTaskCriticalNesting( pthread_t xThreadId );
 static void prvDeleteThread( void *xThreadId );
+//static pthread_mutex_t mc = PTHREAD_MUTEX_INITIALIZER;
 /*-----------------------------------------------------------*/
 
 /*
@@ -162,12 +175,26 @@ xParams *pxThisThreadParams = pvPortMalloc( sizeof( xParams ) );
 
 	vPortEnterCritical();
 
+	// this is necessary so that we can have a multithreaded sitl
+	// basically in the sitl we block all these signals so that sitl threads do not handle them
+	// then, once fc is started, we get here and we unblock them
+	// all subsequently created threads will receive the required signals.
+	sigset_t sigmask;
+	sigemptyset( &sigmask );
+	sigaddset(&sigmask, SIGALRM);
+	sigaddset(&sigmask, SIGUSR1);
+	sigaddset(&sigmask, SIGUSR2);
+	(void)pthread_sigmask( SIG_UNBLOCK, &sigmask, NULL );
+
 	lIndexOfLastAddedTask = prvGetFreeThreadState();
 
 	/* Create the new pThread. */
 	if ( 0 == pthread_mutex_lock( &xSingleThreadMutex ) )
 	{
+		pthread_mutex_lock(&sm);
 		xSentinel = 0;
+		pthread_mutex_unlock(&sm);
+		//sem_trywait(&xSentinel);
 		if ( 0 != pthread_create( &( pxThreads[ lIndexOfLastAddedTask ].hThread ), &xThreadAttributes, prvWaitForStart, (void *)pxThisThreadParams ) )
 		{
 			/* Thread create failed, signal the failure */
@@ -176,9 +203,18 @@ xParams *pxThisThreadParams = pvPortMalloc( sizeof( xParams ) );
 
 		/* Wait until the task suspends. */
 		(void)pthread_mutex_unlock( &xSingleThreadMutex );
-		while ( xSentinel == 0 );
-		vPortExitCritical();
+		//sem_wait(&xSentinel);
+		while ( 1 ) {
+			pthread_mutex_lock(&sm);
+			if( xSentinel != 0) {
+				pthread_mutex_unlock(&sm);
+				break;
+			}
+			pthread_mutex_unlock(&sm);
+		}
 	}
+
+	vPortExitCritical();
 
 	return pxTopOfStack;
 }
@@ -209,9 +245,10 @@ sigset_t xSignalToBlock;
 sigset_t xSignalsBlocked;
 portLONG lIndex;
 
+	//sem_init(&xSentinel, 0, 0);
 	/* Establish the signals to block before they are needed. */
 	sigfillset( &xSignalToBlock );
-
+	
 	/* Block until the end */
 	(void)pthread_sigmask( SIG_SETMASK, &xSignalToBlock, &xSignalsBlocked );
 
@@ -283,6 +320,8 @@ void vPortYieldFromISR( void )
 
 void vPortEnterCritical( void )
 {
+	__sync_synchronize();
+	//pthread_mutex_lock(&mc);
 	vPortDisableInterrupts();
 	uxCriticalNesting++;
 }
@@ -290,6 +329,7 @@ void vPortEnterCritical( void )
 
 void vPortExitCritical( void )
 {
+	__sync_synchronize();
 	/* Check for unmatched exits. */
 	if ( uxCriticalNesting > 0 )
 	{
@@ -303,10 +343,14 @@ void vPortExitCritical( void )
 		if ( pdTRUE == xPendYield )
 		{
 			xPendYield = pdFALSE;
+			// TODO: investigate necessity of this
+			//pthread_mutex_unlock(&mc);
 			vPortYield();
+			//pthread_mutex_lock(&mc);
 		}
 		vPortEnableInterrupts();
 	}
+	//pthread_mutex_unlock(&mc);
 }
 /*-----------------------------------------------------------*/
 
@@ -502,16 +546,17 @@ portBASE_TYPE xResult;
 
 void *prvWaitForStart( void * pvParams )
 {
-xParams * pxParams = ( xParams * )pvParams;
-pdTASK_CODE pvCode = pxParams->pxCode;
-void * pParams = pxParams->pvParams;
-	vPortFree( pvParams );
+	__sync_synchronize();
+	xParams * pxParams = ( xParams * )pvParams;
+	pdTASK_CODE pvCode = pxParams->pxCode;
+	void * pParams = pxParams->pvParams;
 
 	pthread_t thr = pthread_self();
 	pthread_cleanup_push( prvDeleteThread, (void*)thr );
 
 	if ( 0 == pthread_mutex_lock( &xSingleThreadMutex ) )
 	{
+		//vPortFree( pvParams );
 		prvSuspendThread( pthread_self() );
 	}
 
@@ -529,7 +574,10 @@ sigset_t xSignals;
 	/* Only interested in the resume signal. */
 	sigemptyset( &xSignals );
 	sigaddset( &xSignals, SIG_RESUME );
+	//sem_post(&xSentinel);
+	pthread_mutex_lock(&sm);
 	xSentinel = 1;
+	pthread_mutex_unlock(&sm);
 
 	/* Unlock the Single thread mutex to allow the resumed task to continue. */
 	if ( 0 != pthread_mutex_unlock( &xSingleThreadMutex ) )
@@ -558,17 +606,30 @@ sigset_t xSignals;
 
 void prvSuspendThread( pthread_t xThreadId )
 {
-portBASE_TYPE xResult = pthread_mutex_lock( &xSuspendResumeThreadMutex );
+	portBASE_TYPE xResult = pthread_mutex_lock( &xSuspendResumeThreadMutex );
 	if ( 0 == xResult )
 	{
 		/* Set-up for the Suspend Signal handler? */
+		pthread_mutex_lock(&sm);
 		xSentinel = 0;
+		pthread_mutex_unlock(&sm);
+		//sem_trywait(&xSentinel);
 		xResult = pthread_mutex_unlock( &xSuspendResumeThreadMutex );
 		xResult = pthread_kill( xThreadId, SIG_SUSPEND );
         if (xResult)
             printf("pthread_kill error!\n");
-		while ( ( xSentinel == 0 ) && ( pdTRUE != xServicingTick ) )
-		{
+		/*
+		while(sem_trywait(&xSentinel) != 0 && (pdTRUE != xServicingTick)){
+			sched_yield();
+		}
+		*/
+		while ( 1 ){
+			pthread_mutex_lock(&sm);
+			if(!(( xSentinel == 0 ) && ( pdTRUE != xServicingTick ) )){
+				pthread_mutex_unlock(&sm);
+				break;
+			}
+			pthread_mutex_unlock(&sm);
 			sched_yield();
 		}
 	}
