@@ -54,6 +54,8 @@
  * Implementation of functions defined in portable.h for the Posix port.
  *----------------------------------------------------------*/
 
+#define _GNU_SOURCE
+
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -153,7 +155,7 @@ void vPortStartFirstTask( void );
 /*
  * See header file for description.
  */
-portSTACK_TYPE *pxPortInitialiseStack( portSTACK_TYPE *pxTopOfStack, pdTASK_CODE pxCode, void *pvParameters )
+portSTACK_TYPE *pxPortInitialiseStack( portSTACK_TYPE *pxTopOfStack, pdTASK_CODE pxCode, const char *pcName, void *pvParameters )
 {
 /* Should actually keep this struct on the stack. */
 xParams *pxThisThreadParams = pvPortMalloc( sizeof( xParams ) );
@@ -200,6 +202,8 @@ xParams *pxThisThreadParams = pvPortMalloc( sizeof( xParams ) );
 			/* Thread create failed, signal the failure */
 			pxTopOfStack = 0;
 		}
+
+		pthread_setname_np(pxThreads[ lIndexOfLastAddedTask ].hThread, pcName);
 
 		/* Wait until the task suspends. */
 		(void)pthread_mutex_unlock( &xSingleThreadMutex );

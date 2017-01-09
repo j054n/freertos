@@ -939,11 +939,11 @@ UBaseType_t x;
 	the	top of stack variable is updated. */
 	#if( portUSING_MPU_WRAPPERS == 1 )
 	{
-		pxNewTCB->pxTopOfStack = pxPortInitialiseStack( pxTopOfStack, pxTaskCode, pvParameters, xRunPrivileged );
+		pxNewTCB->pxTopOfStack = pxPortInitialiseStack( pxTopOfStack, pxTaskCode, pcName, pvParameters, xRunPrivileged );
 	}
 	#else /* portUSING_MPU_WRAPPERS */
 	{
-		pxNewTCB->pxTopOfStack = pxPortInitialiseStack( pxTopOfStack, pxTaskCode, pvParameters );
+		pxNewTCB->pxTopOfStack = pxPortInitialiseStack( pxTopOfStack, pxTaskCode, pcName, pvParameters );
 	}
 	#endif /* portUSING_MPU_WRAPPERS */
 
