@@ -226,8 +226,9 @@ static void prvTaskExitError( void );
 /*
  * See header file for description.
  */
-StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack, TaskFunction_t pxCode, void *pvParameters )
+StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack, TaskFunction_t pxCode, const char *pcName, void *pvParameters )
 {
+	(void)pcName;
 	/* Simulate the stack frame as it would be created by a context switch
 	interrupt. */
 

@@ -216,9 +216,9 @@ xParams *pxThisThreadParams = pvPortMalloc( sizeof( xParams ) );
 			}
 			pthread_mutex_unlock(&sm);
 		}
+		vPortExitCritical();
 	}
 
-	vPortExitCritical();
 
 	return pxTopOfStack;
 }
